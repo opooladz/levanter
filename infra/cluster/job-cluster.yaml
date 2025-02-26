@@ -8,14 +8,15 @@
 # - Change to the TPU quota you have available
 # cf: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-full.yaml
 # cf: https://docs.ray.io/en/latest/cluster/vms/references/ray-cluster-configuration.html
+
 # Unique Identifier for the Head Node + Workers
-cluster_name: levanter-cluster
+cluster_name: marin-eu-west4-a
 
 # Configure GCP
 provider:
   type: gcp
-  region: us-west4
-  availability_zone: us-west4-a
+  region: europe-west4
+  availability_zone: europe-west4-a
   project_id: hai-gcp-models
 
 # Maximum Workers (excluding Head Node)
@@ -33,16 +34,14 @@ available_node_types:
     # GCP-Specific Configuration; by default, Ray will configure unspecified fields (e.g., subnets, ssh-keys)
     #   => Ref: https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
     node_config:
-      machineType: n2-standard-2
-
-      # Create a Persistent Disk w/ 100 GBs
+      machineType: n2-standard-8
+      # Create a Persistent Disk w/ 200 GBs
       disks:
         - boot: true
           autoDelete: true
           type: PERSISTENT
           initializeParams:
-            diskSizeGb: 100
-
+            diskSizeGb: 200
             # Set Source Image =>> Ubuntu 22.04 Base VM
             sourceImage: projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts
 
@@ -51,11 +50,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v4-8
       runtimeVersion: tpu-ubuntu2204-base
-
       # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
@@ -64,12 +61,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v4-32
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -77,12 +71,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: {"CPU": 120, "TPU": 4}
-
     node_config:
       acceleratorType: v4-64
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -91,12 +82,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v4-128
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -104,12 +92,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v4-256
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -117,12 +102,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v4-512
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -130,12 +112,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v5litepod-16
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -143,12 +122,9 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v5litepod-64
       runtimeVersion: tpu-ubuntu2204-base
-
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
       schedulingConfig:
         preemptible: true
 
@@ -156,17 +132,85 @@ available_node_types:
     min_workers: 0
     max_workers: 1024
     resources: { "CPU": 120, "TPU": 4 }
-
     node_config:
       acceleratorType: v5litepod-256
       runtimeVersion: tpu-ubuntu2204-base
+      schedulingConfig:
+        preemptible: true
 
-      # [IMPORTANT] Configure all TPU Workers to be Preemptible!
+  # Additional TPU Node Types from the new configuration (v6e series)
+  tpu_worker:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-4
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_8:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-8
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_16:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-16
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_32:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-32
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_64:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-64
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_128:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-128
+      runtimeVersion: v2-alpha-tpuv6e
+      schedulingConfig:
+        preemptible: true
+
+  tpu_slice_v6e_256:
+    min_workers: 0
+    max_workers: 1024
+    resources: { "CPU": 120, "TPU": 4 }
+    node_config:
+      acceleratorType: v6e-256
+      runtimeVersion: v2-alpha-tpuv6e
       schedulingConfig:
         preemptible: true
 
 docker:
-    image: "ghcr.io/stanford-crfm/levanter-cluster:latest"
+    image: "europe-west4-docker.pkg.dev/hai-gcp-models/marin/marin_cluster:6da1c9ed"
     container_name: "ray_docker"
     pull_before_run: true
     worker_run_options:
@@ -179,7 +223,7 @@ docker:
         - -v "/var/run/docker.sock:/var/run/docker.sock"
 
 initialization_commands:
-  - yes | gcloud auth configure-docker us-west4-docker.pkg.dev
+  - yes | gcloud auth configure-docker europe-west4-docker.pkg.dev
   - "export TPU_WORKER_ID=$(curl -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/agent-worker-number) || true"
   - which docker || (curl -fsSL https://get.docker.com -o get-docker.sh; sudo sh get-docker.sh; sudo usermod -aG docker $USER; sudo systemctl restart docker -f)
   # always run this because ray doesn't run with sudo
@@ -187,6 +231,19 @@ initialization_commands:
   # we want to launch docker containers from inside docker, which means we need to loosen the permissions on the docker
   # socket. This isn't the best security practice, but it's the easiest way to get this working.
   - sudo chmod 666 /var/run/docker.sock
+
+# Additional setup commands from the new configuration
+setup_commands:
+  - gcloud config set project hai-gcp-models
+  - gcloud config set compute/region europe-west4
+  - gcloud config set compute/zone europe-west4-a
+  - mkdir $HOME/.cache/huggingface -p
+  - gcloud secrets versions access latest --secret=HF_TOKEN > $HOME/.cache/huggingface/token
+  - mkdir $HOME/.cache/openai -p
+  - gcloud secrets versions access latest --secret=OPENAI_API_KEY > $HOME/.cache/openai/token
+  - echo 'export MARIN_PREFIX="gs://marin-eu-west4"' >> $HOME/.bashrc
+  - echo 'export BUCKET="marin-eu-west4"' >> $HOME/.bashrc
+  - gcsfuse --implicit-dirs --only-dir gcsfuse_mount $BUCKET /opt/gcsfuse_mount || true
 
 head_setup_commands:
   - mkdir $HOME/.cache/huggingface -p
