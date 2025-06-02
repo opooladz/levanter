@@ -11,7 +11,7 @@ import haliax as hax
 from haliax import Axis, NamedArray, NamedOrNumeric
 
 from levanter.models.attention import AttentionMask
-from levanter.models.loss import maybe_fused_next_token_loss
+from levanter.models.loss import maybe_fused_next_token_loss, l2_weight_decay
 
 
 LmConfigT = TypeVar("LmConfigT", bound="LmConfig")
@@ -242,6 +242,7 @@ def compute_next_token_loss(
     reduction_axis: Optional[hax.AxisSelection] = None,
     logsumexp_weight: Optional[float] = None,
     loss_dtype: Optional[jnp.dtype] = jnp.float32,
+    l2_weight_decay_weight: Optional[float] = None,    
 ) -> jnp.ndarray | NamedArray:
     """
     Computes the cross-entropy loss for a language modeling example. If reduction is not None, the loss is reduced
@@ -269,4 +270,8 @@ def compute_next_token_loss(
         block_size=model.config.cross_entropy_block_size,
     )
 
-    return loss + aux_loss
+    l2_reg = 0.0
+    if l2_weight_decay_weight is not None and l2_weight_decay_weight != 0.0:
+        l2_reg = l2_weight_decay(model, l2_weight_decay_weight)
+    
+    return loss + l2_reg + aux_loss
