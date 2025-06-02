@@ -491,3 +491,26 @@ def _block_one_hot(LBlock, block_start, labels, dtype):
     # 0 out the logits that are not in this block
     target_y_block *= target_is_in_this_block
     return target_y_block
+
+def l2_weight_decay(model_params: eqx.Module, weight: float = 0.0) -> jnp.ndarray:
+    """
+    Computes L2 weight decay regularization.
+    
+    Args:
+        model_params: The model parameters to compute weight decay for
+        weight: Weight for the L2 regularization term
+        
+    Returns:
+        The L2 regularization loss
+    """
+    if weight == 0.0: # Added early exit
+        return 0.0
+
+    params_leaves = jax.tree_util.tree_leaves(model_params)
+    l2_reg = 0.0
+    for p in params_leaves:
+        # Added filtering to match source fork
+        if hasattr(p, 'ndim') and p.ndim > 1 and jnp.issubdtype(p.dtype, jnp.number):
+            l2_reg += jnp.sum(p ** 2)
+    
+    return weight * l2_reg
