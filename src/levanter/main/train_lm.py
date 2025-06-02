@@ -48,6 +48,7 @@ class TrainLmConfig:
     # TODO: atm you have to at least specify a levanter model config with the same type as the hf checkpoint
 
     z_loss_weight: float = 0.0
+    l2_weight_decay_weight: float = 0.0        
 
     hf_save_path: Optional[str] = None
     hf_upload: Optional[str] = None
@@ -100,7 +101,7 @@ def main(config: TrainLmConfig):
     levanter.initialize(config)
     optimizer = config.optimizer.build(config.trainer.num_train_steps)
 
-    loss_function = functools.partial(compute_next_token_loss, logsumexp_weight=config.z_loss_weight)
+    loss_function = functools.partial(compute_next_token_loss, logsumexp_weight=config.z_loss_weight, l2_weight_decay_weight=config.l2_weight_decay_weight    )
 
     # Using the trainer as a context manager does 3 things:
     # 1. Sets the device mesh
