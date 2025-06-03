@@ -242,20 +242,24 @@ def compute_next_token_loss(
     reduction_axis: Optional[hax.AxisSelection] = None,
     logsumexp_weight: Optional[float] = None,
     loss_dtype: Optional[jnp.dtype] = jnp.float32,
-    l2_weight_decay_weight: Optional[float] = None,    
-) -> jnp.ndarray | NamedArray:
+    l2_weight_decay_weight: Optional[float] = None,
+) -> tuple[NamedArray | jnp.ndarray, dict[str, NamedArray | jnp.ndarray]]:
     """
-    Computes the cross-entropy loss for a language modeling example. If reduction is not None, the loss is reduced
-    across the reduction axis (with reduction_axis=None meaning all axes). If reduction is None, the loss is not
-    reduced, and the result is a named array with axes (*batch axes, sequence_length).
+    Computes the cross-entropy loss for a language modeling example and auxiliary metrics.
+
+    Returns:
+        A tuple of (scalar_loss_for_gradient, auxiliary_metrics_dict).
+        The scalar_loss_for_gradient is used for backpropagation.
+        auxiliary_metrics_dict contains other metrics to be logged, like penalties.
     """
     activations = model.activations(example.tokens, example.attn_mask, key=key)
 
-    aux_loss = 0
+    internal_aux_loss_val = 0.0  # from model.activations, if any
     if isinstance(activations, tuple):
-        activations, aux_loss = activations
+        activations, internal_aux_loss_val = activations
 
-    loss = maybe_fused_next_token_loss(
+    # main_loss_component already includes the logsumexp_penalty if logsumexp_weight is active
+    main_loss_component, logsumexp_penalty_val = maybe_fused_next_token_loss(
         model.Pos,
         model.Embed,
         model.Vocab,
@@ -263,15 +267,48 @@ def compute_next_token_loss(
         model.get_lm_head(),
         example.tokens,
         loss_mask=example.loss_mask,
-        reduction=reduction,
+        reduction=reduction, # ensure this reduction gives a scalar if that's expected for grad loss
         reduction_axis=reduction_axis,
         logsumexp_weight=logsumexp_weight,
         dtype=loss_dtype,
         block_size=model.config.cross_entropy_block_size,
     )
 
-    l2_reg = 0.0
+    # Ensure a JAX-compatible scalar zero for initializing metrics.
+    # main_loss_component is expected to be scalar here due to reduction.
+    metric_dtype = main_loss_component.dtype
+    scalar_zero = hax.zeros((), dtype=metric_dtype) # Create a scalar NamedArray
+
+    auxiliary_metrics = {
+        "train/logsumexp_penalty": scalar_zero,
+        "train/l2_regularization": scalar_zero,
+        "train/internal_aux_loss": scalar_zero,
+    }
+
+    if logsumexp_weight is not None and logsumexp_weight != 0.0:
+        auxiliary_metrics["train/logsumexp_penalty"] = logsumexp_penalty_val
+    # No elif needed if initialized to zero, but if logsumexp_penalty_val could be None, handle explicitly:
+    elif logsumexp_weight is not None: # weight is 0.0 or None and val might be non-zero from loss.py
+        auxiliary_metrics["train/logsumexp_penalty"] = hax.zeros_like(logsumexp_penalty_val)
+
+
+    l2_reg_actual_value = 0.0
     if l2_weight_decay_weight is not None and l2_weight_decay_weight != 0.0:
-        l2_reg = l2_weight_decay(model, l2_weight_decay_weight)
+        l2_reg_actual_value = l2_weight_decay(model, l2_weight_decay_weight)
+        auxiliary_metrics["train/l2_regularization"] = l2_reg_actual_value
     
-    return loss + l2_reg + aux_loss
+    # Handle internal_aux_loss_val, ensuring it's a JAX type for the PyTree
+    if isinstance(internal_aux_loss_val, (float, int)):
+        typed_internal_aux_loss = jnp.array(internal_aux_loss_val, dtype=main_loss_component.dtype)
+    else: # Assumed to be a JAX array already or compatible
+        typed_internal_aux_loss = internal_aux_loss_val
+    
+    if not isinstance(typed_internal_aux_loss, (float, int)) or typed_internal_aux_loss != 0.0: # Check after potential conversion
+         auxiliary_metrics["train/internal_aux_loss"] = typed_internal_aux_loss
+
+
+    # The loss for gradient computation should be the sum of all components that contribute to gradients.
+    # main_loss_component already includes the logsumexp penalty if active.
+    total_loss_for_gradient = main_loss_component + l2_reg_actual_value + typed_internal_aux_loss # ensure all are JAX types
+    
+    return total_loss_for_gradient, auxiliary_metrics

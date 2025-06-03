@@ -195,18 +195,22 @@ class Trainer:
     @cached_property
     def loss_fn(self):
         """
-        Wrapped loss function that casts the model to compute precision and sets the context axis mapping to compute
+        Wrapped loss function that casts the model to compute precision,
+        sets the context axis mapping to compute, and handles auxiliary data.
         """
 
         @functools.wraps(self._raw_loss_function)
         def fn(model, *batch, **batch_kwargs):
             with hax.axis_mapping(self.compute_axis_mapping):
                 model = self.mp.cast_to_compute(model)
-                return _ensure_scalar(self._raw_loss_function(model, *batch, **batch_kwargs))
+                # _raw_loss_function is expected to return (loss_value, aux_dict)
+                loss_value, aux_dict = self._raw_loss_function(model, *batch, **batch_kwargs)
+                scalar_loss = _ensure_scalar(loss_value)
+                return scalar_loss, aux_dict # Return as a pair
 
         return fn
 
-    @property
+    @property                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
     def run_id(self) -> str:
         """Returns the run id"""
         assert self.config.id is not None
@@ -545,11 +549,16 @@ class Trainer:
     def _train_step(
         self, state: S, batch, batch_kwargs, _no_hooks=False
     ) -> tuple[Scalar, S, dict[str, Any], Sequence[CBInfo] | None]:
-        with levanter.tracker.defer_tracker_for_jit() as metrics:
+        with levanter.tracker.defer_tracker_for_jit() as metrics_from_tracker:
             key, new_key = jax.random.split(state.training_key)
             model = inference_mode(state.model, False)
 
-            loss, grads = self._compute_gradients_microbatched(self.loss_fn, model, *batch, **batch_kwargs, key=key)
+            # loss_fn now returns (loss, aux_metrics)
+            (loss, aux_metrics), grads = self._compute_gradients_microbatched(self.loss_fn, model, *batch, **batch_kwargs, key=key)
+
+            # Merge aux_metrics into the metrics collected by the tracker
+            if aux_metrics:
+                metrics_from_tracker.update(aux_metrics)
 
             # Sophia needs to be able to access the loss function in the optimizer
             def obj_fun(trainable_model):
@@ -567,14 +576,15 @@ class Trainer:
                     hook_infos = self.hooks.run_jit_hooks(state, jit_info, force=False)
 
         if _no_hooks:
-            return loss, new_state, metrics, None
+            return loss, new_state, metrics_from_tracker, None
         else:
-            return loss, new_state, metrics, hook_infos
+            return loss, new_state, metrics_from_tracker, hook_infos
 
-    def _compute_gradients_microbatched(self, loss_fn, model: M, *batch, **batch_kwargs) -> tuple[Scalar, M]:
+    def _compute_gradients_microbatched(self, loss_fn, model: M, *batch, **batch_kwargs) -> tuple[tuple[Scalar, dict[str, Any]], M]:
         Batch = _resolve_axis_in_tree((batch, batch_kwargs), self.config.batch_axis)
 
-        grad_fn = eqx.filter_value_and_grad(loss_fn, has_aux=False)
+        # loss_fn will now return (loss, aux_data), so has_aux=True
+        grad_fn = eqx.filter_value_and_grad(loss_fn, has_aux=True)
 
         mbs = self.config.microbatch_size
         if mbs is not None:
@@ -587,7 +597,9 @@ class Trainer:
             )
 
         with hax.axis_mapping(self.compute_axis_mapping):
-            return grad_fn(model, *batch, **batch_kwargs)
+            # grad_fn now returns ((loss, aux_data), grads)
+            (loss_val, aux_data), grads = grad_fn(model, *batch, **batch_kwargs)
+            return (loss_val, aux_data), grads
 
     def write_artifact(self, name: str, artifact: Any, type: Optional[str] = None):
         """Saves an artifact to disk (in the run dir) and logs it to the tracker."""

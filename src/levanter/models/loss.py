@@ -2,6 +2,7 @@ import functools
 from typing import Optional
 
 import equinox
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -23,7 +24,7 @@ def maybe_fused_next_token_loss(
     logsumexp_weight: Optional[float] = None,
     block_size: Optional[int] = None,
     dtype: Optional[jnp.dtype] = jnp.float32,
-) -> NamedArray:
+) -> tuple[NamedArray, NamedArray]:
     """
     Compute the next token loss with optional block-wise processing.
 
@@ -40,7 +41,7 @@ def maybe_fused_next_token_loss(
         block_size (Optional[int]): Size of each block for processing.
 
     Returns:
-        NamedArray: Computed loss.
+        tuple[NamedArray, NamedArray]: Computed loss and penalty value.
     """
     # Resolve axes
     Pos = pred_embeddings.resolve_axis(Pos.name)
@@ -90,7 +91,7 @@ def next_token_loss(
     reduction: Optional[hax.ReductionFunction] = hax.mean,
     reduction_axis: Optional[hax.AxisSelection] = None,
     logsumexp_weight: Optional[float] = None,
-):
+) -> tuple[NamedArray, NamedArray]:
     """
     Compute the next token loss with optional logsumexp penalty.
 
@@ -104,7 +105,7 @@ def next_token_loss(
         reduction_axis: axis to apply reduction. None means all axes
         logsumexp_weight: weight for the logsumexp penalty
     Returns:
-        NamedArray: computed loss
+        tuple[NamedArray, NamedArray]: computed loss and penalty value
     """
     Pos = logits.resolve_axis(hax.axis_name(Pos))
 
@@ -138,15 +139,30 @@ def cross_entropy_and_logsumexp_penalty(
     reduction_axis: Optional[hax.AxisSelection] = None,
     where: Optional[NamedArray] = None,
     logsumexp_weight=0.0,
-) -> NamedArray:
-    """A loss function that combines cross entropy loss with a logsumexp penalty."""
+) -> tuple[NamedArray, NamedArray]:
+    """A loss function that combines cross entropy loss with a logsumexp penalty.
+    Returns a tuple of (final_loss, reduced_penalty_val).
+    `reduced_penalty_val` is the penalty component, reduced in the same way as `final_loss`.
+    """
 
     loss, log_normalizers = cross_entropy_loss_and_log_normalizers(pred_y, Vocab, target_y)
 
-    if logsumexp_weight is not None and logsumexp_weight != 0.0:
-        loss = loss + logsumexp_weight * (log_normalizers**2)
+    # Initialize penalty_val with a structure that can be reduced like the loss.
+    # If no penalty is applied, it remains zero.
+    unreduced_penalty_val = hax.zeros_like(loss)
 
-    return hax.nn.loss.maybe_reduce_loss(loss, reduction, reduction_axis, where)
+    if logsumexp_weight is not None and logsumexp_weight != 0.0:
+        current_penalty_component = logsumexp_weight * (log_normalizers**2)
+        loss = loss + current_penalty_component
+        unreduced_penalty_val = current_penalty_component
+
+    final_loss = hax.nn.loss.maybe_reduce_loss(loss, reduction, reduction_axis, where)
+    
+    # Reduce the penalty_val in the same way as the loss was reduced.
+    # If reduction is None, reduced_penalty_val will be unreduced_penalty_val.
+    reduced_penalty_val = hax.nn.loss.maybe_reduce_loss(unreduced_penalty_val, reduction, reduction_axis, where)
+
+    return final_loss, reduced_penalty_val
 
 
 def fused_cross_entropy_loss_and_logsumexp_penalty(
@@ -162,37 +178,34 @@ def fused_cross_entropy_loss_and_logsumexp_penalty(
     logsumexp_weight: float | None = 0.0,
     block_size: int,
     dtype: Optional[jnp.dtype] = jnp.float32,
-) -> NamedArray:
+) -> tuple[NamedArray, NamedArray]:
     """
     Compute the cross-entropy loss and logsumexp penalty using embeddings and lm_head,
     with optional block-wise processing.
-
-    Args:
-        pred_embeddings (NamedArray): Predicted embeddings.
-        pred_lm_head (NamedArray): Language model head weights.
-        Contract (hax.AxisSelector): Axis to contract over.
-        Label (hax.AxisSelector): Label (Vocab) axis.
-        target_y (NamedArray): One-hot encoded target tokens.
-        reduction (Optional[hax.ReductionFunction]): Reduction function.
-        reduction_axis (Optional[hax.AxisSelection]): Axis to apply reduction.
-        where (Optional[NamedArray]): Mask to apply to the loss.
-        logsumexp_weight (float): Weight for logsumexp penalty.
-        block_size (int): Size of each block for processing.
-        dtype (Optional[jnp.dtype]): Data type for the loss.
-
-    Returns:
-        NamedArray: Computed loss.
+    Returns a tuple of (final_loss, reduced_penalty_val).
+    `reduced_penalty_val` is the penalty component, reduced in the same way as `final_loss`.
     """
 
     # Block-wise softmax computation
-    loss, log_normalizers = _blockwise_cross_entropy_loss(
+    loss_component, log_normalizers = _blockwise_cross_entropy_loss(
         (pred_embeddings, pred_lm_head), Contract, Label, target_y, block_size, dtype=dtype
     )
 
-    if logsumexp_weight is not None and (not isinstance(logsumexp_weight, (int, float)) or logsumexp_weight != 0.0):
-        loss = loss + logsumexp_weight * (log_normalizers**2)
+    current_loss = loss_component
+    # Initialize penalty_val with a structure that can be reduced like the loss.
+    unreduced_penalty_val = hax.zeros_like(current_loss) 
 
-    return hax.nn.loss.maybe_reduce_loss(loss, reduction, reduction_axis, where)
+    if logsumexp_weight is not None and (not isinstance(logsumexp_weight, (int, float)) or logsumexp_weight != 0.0):
+        current_penalty_component = logsumexp_weight * (log_normalizers**2)
+        current_loss = current_loss + current_penalty_component
+        unreduced_penalty_val = current_penalty_component
+
+    final_loss = hax.nn.loss.maybe_reduce_loss(current_loss, reduction, reduction_axis, where)
+
+    # Reduce the penalty_val in the same way as the loss was reduced.
+    reduced_penalty_val = hax.nn.loss.maybe_reduce_loss(unreduced_penalty_val, reduction, reduction_axis, where)
+
+    return final_loss, reduced_penalty_val
 
 
 @equinox.filter_custom_vjp

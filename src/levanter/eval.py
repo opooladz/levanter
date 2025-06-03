@@ -333,14 +333,21 @@ class TaggedEvaluator:
             with context:
                 if axis_mapping is not None:
                     context.enter_context(hax.axis_mapping(axis_mapping))
-                losses = compute_next_token_loss(m, batch, reduction=None, reduction_axis=())
+                
+                # compute_next_token_loss now returns (loss_value, aux_metrics_dict)
+                loss_values, _aux_metrics_eval = compute_next_token_loss(m, batch, reduction=None, reduction_axis=())
+                # We are currently ignoring _aux_metrics_eval in the evaluation path.
+                # If specific auxiliary metrics from eval need to be logged, this is where they could be handled.
+
                 mask = batch.loss_mask  # [Batch, Pos]
                 this_tokens = hax.sum(mask)
-                this_loss = hax.einsum("->", losses, mask)  # to scalar
+                # Use loss_values (the actual loss component) here
+                this_loss = hax.einsum("->", loss_values, mask)  # to scalar
 
                 # all the *_per_tag variables are [Tag]
                 this_tokens_per_tag = hax.einsum("-> tag", mask, tags)
-                this_loss_per_tag = hax.einsum("-> tag", mask, losses, tags)  # [Tag]
+                 # Use loss_values here as well
+                this_loss_per_tag = hax.einsum("-> tag", mask, loss_values, tags)  # [Tag]
 
                 mean = state.token_avg_loss.add(this_loss / this_tokens, this_tokens)
                 state = dataclasses.replace(state, token_avg_loss=mean)
